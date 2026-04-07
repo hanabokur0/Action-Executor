@@ -1,0 +1,116 @@
+"""
+GO/NO Executor - Entry Point
+
+Rule format:
+  {
+    "action": "copy_customer_ids",
+    "target": "customer_id_list",
+    "conditions": {"input_state": "ready"},
+    "on_fail": "return_to_human"
+  }
+
+Pipeline:
+  rule → check_conditions(context) → execute → GO or NO
+"""
+
+import csv
+from datetime import datetime
+from pathlib import Path
+from execution.action_executor import execute
+
+UNKNOWN_LOG = "unknown_log.csv"
+
+
+def check_conditions(conditions: dict, context: dict) -> tuple[bool, str | None]:
+    for k, v in conditions.items():
+        if context.get(k) != v:
+            return False, f"{k} mismatch"
+    return True, None
+
+
+def validate(rule: dict, context: dict | None = None) -> dict:
+    if not rule.get("action"):
+        return {"result": False, "reason": "action required", "type": "VALIDATION_ERROR"}
+    if not rule.get("target"):
+        return {"result": False, "reason": "target required", "type": "VALIDATION_ERROR"}
+
+    conditions = rule.get("conditions", {})
+    ok, reason = check_conditions(conditions, context or {})
+    if not ok:
+        return {"result": False, "reason": reason, "type": "VALIDATION_ERROR"}
+
+    return {"result": True}
+
+
+def log_no(rule: dict, reason: str, error_type: str):
+    path = Path(UNKNOWN_LOG)
+    is_new = not path.exists()
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["logged_at", "action", "target", "reason", "type", "on_fail"])
+        if is_new:
+            writer.writeheader()
+        writer.writerow({
+            "logged_at": datetime.now().isoformat(),
+            "action":    rule.get("action", ""),
+            "target":    rule.get("target", ""),
+            "reason":    reason,
+            "type":      error_type,
+            "on_fail":   rule.get("on_fail", ""),
+        })
+
+
+def run(rules: list[dict], context: dict | None = None):
+    ctx = context or {}
+    for i, rule in enumerate(rules):
+        print(f"\n--- [{i+1}] {rule.get('action')} ---")
+
+        v = validate(rule, ctx)
+        if not v["result"]:
+            on_fail = rule.get("on_fail", "return_to_human")
+            print(f"[NO] {v['reason']} → {on_fail}")
+            log_no(rule, v["reason"], v["type"])
+            continue
+        print("[OK] conditions passed")
+
+        result = execute(rule["action"], rule["target"])
+
+        if result["status"] == "ok":
+            print(f"[GO] executed successfully")
+        else:
+            on_fail = rule.get("on_fail", "return_to_human")
+            print(f"[NO] {result['reason']} → {on_fail}")
+            log_no(rule, result["reason"], result["type"])
+
+
+if __name__ == "__main__":
+    # context = 実行時の状態。どこからでも渡せる
+    context = {"input_state": "ready", "user_role": "admin"}
+
+    demo_rules = [
+        {
+            "action": "copy_customer_ids",
+            "target": "customer_id_list",
+            "conditions": {"input_state": "ready"},
+            "on_fail": "return_to_human"
+        },
+        {
+            "action": "notify_note",
+            "target": "note_text",
+            "conditions": {"input_state": "ready", "user_role": "admin"},
+            "on_fail": "return_to_human"
+        },
+        {
+            "action": "copy_customer_ids",
+            "target": "customer_id_list",
+            "conditions": {"input_state": "pending"},   # NO: mismatch
+            "on_fail": "return_to_human"
+        },
+        {
+            "action": "copy_customer_ids",
+            "target": "unknown_target",                 # NO: not found
+            "conditions": {"input_state": "ready"},
+            "on_fail": "return_to_human"
+        },
+    ]
+
+    run(demo_rules, context)
