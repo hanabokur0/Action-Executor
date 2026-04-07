@@ -1,0 +1,48 @@
+"""
+Action Executor - GO/NO Execution Layer
+Standalone execution unit. Works independently or as part of Protocol Engine.
+"""
+
+MAX_LEN = 100
+
+
+def resolve_target(target: str):
+    """
+    Target resolver: converts semantic target names to actual data.
+    Replace this mapping with your own data source (CSV, API, DB, etc.)
+    """
+    mapping = {
+        "customer_id_list": ["C001", "C002", "C003"],
+        "note_text": "hello world",
+    }
+    return mapping.get(target)
+
+
+def execute(action: str, target: str) -> dict:
+    """
+    Core execution function.
+    Returns {"status": "ok"} or {"status": "no", "reason": "..."}
+    """
+    data = resolve_target(target)
+
+    # --- NO conditions ---
+    if data is None:
+        return {"status": "no", "reason": "target_not_found", "type": "RESOLUTION_ERROR"}
+
+    if isinstance(data, str) and len(data) > MAX_LEN:
+        return {"status": "no", "reason": "data_too_long", "type": "VALIDATION_ERROR"}
+
+    # --- Execute ---
+    if action in ("copy", "copy_customer_ids"):
+        print(f"[EXEC] copy → {data}")
+        return {"status": "ok", "data": data}
+
+    if action in ("notify", "notify_note"):
+        print(f"[EXEC] notify → {data}")
+        return {"status": "ok", "data": data}
+
+    if action == "log":
+        print(f"[EXEC] log → {data}")
+        return {"status": "ok", "data": data}
+
+    return {"status": "no", "reason": "unknown_action", "type": "ACTION_ERROR"}
